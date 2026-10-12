@@ -51,6 +51,7 @@ typedef int32_t ot_status;
 #define OT_IMAGE_OUTPUT_TOO_SMALL (-INT32_C(45))
 #define OT_IMAGE_UNSUPPORTED_FEATURE (-INT32_C(46))
 #define OT_IMAGE_BUSY (-INT32_C(47))
+#define OT_VIDEO_FAILED (-INT32_C(60))
 
 /* A context owns its native resources and I/O storage. Only its creating OS
  * thread may call its functions, including error queries and destruction.
@@ -82,6 +83,7 @@ typedef struct ot_handle {
 #define OT_SCENE_CUSTOM UINT32_C(6)
 #define OT_SCENE_TEXT_VIEW UINT32_C(7)
 #define OT_SCENE_IMAGE UINT32_C(8)
+#define OT_SCENE_VIDEO UINT32_C(9)
 #define OT_SCENE_WRAP_NONE UINT32_C(0)
 #define OT_SCENE_WRAP_CHAR UINT32_C(1)
 #define OT_SCENE_WRAP_WORD UINT32_C(2)
@@ -557,7 +559,7 @@ ot_status ot_scene_set_hooks(ot_context *, const ot_handle *node, const ot_scene
  * it plays RENDER_BEFORE, then RENDER_SELF in place of the node's native body,
  * then native editor cursor maintenance, then RENDER_AFTER, before the node's
  * children. A slot without a recorded phase draws nothing for that phase. An
- * IMAGE node with a backing buffer from ot_scene_set_image plays its phases into
+ * IMAGE or VIDEO node with a backing buffer from ot_scene_set_image or ot_scene_set_video plays its phases into
  * that buffer, in buffer coordinates, after native code clears it and before
  * composing it.
  * recording must be NULL with zero length for every other acknowledgement.
@@ -1580,6 +1582,46 @@ ot_status ot_image_pixels_release(ot_context *, const ot_handle *lease);
  * fit and protocol use OT_IMAGE_*; mutations reject measurement-callback reentry. */
 ot_status ot_scene_set_image(ot_context *, const ot_handle *node, const ot_handle *image,
     uint32_t fit, uint32_t protocol, const ot_handle *buffer);
+
+/* A VIDEO node owns one decoder and player. Decoded frames stay native: each paint
+ * of the node advances playback and draws the current frame as the IMAGE node does,
+ * from a small set of images that the decoder refreshes in place while no buffer
+ * retains them. Hosts keep frames painting while playback runs, for example with a
+ * live renderable. ot_scene_set_video sets fit and buffer as ot_scene_set_image does;
+ * frames draw with OT_IMAGE_PROTOCOL_AUTO.
+ * ot_video_open replaces the player; a zero path_length closes it. Audio plays through
+ * a private audio engine and is the media clock while it plays. Failed opens, seeks,
+ * and decodes return OT_VIDEO_FAILED; ot_video_get_error copies the detail. */
+typedef struct ot_video_info {
+    int64_t duration_us;
+    uint32_t width, height, fps_num, fps_den, has_audio, reserved;
+} ot_video_info;
+#define OT_VIDEO_PLAYING UINT32_C(1)
+#define OT_VIDEO_ENDED UINT32_C(2)
+#define OT_VIDEO_BUFFERING UINT32_C(4)
+#define OT_VIDEO_AUDIO UINT32_C(8)
+#define OT_VIDEO_HAS_FRAME UINT32_C(16)
+#define OT_VIDEO_ERROR UINT32_C(32)
+typedef struct ot_video_state {
+    int64_t current_time_us;
+    int64_t frame_pts_us;
+    uint32_t flags, reserved;
+} ot_video_state;
+ot_status ot_scene_set_video(ot_context *, const ot_handle *node, uint32_t fit, const ot_handle *buffer);
+ot_status ot_video_open(ot_context *, const ot_handle *node, const uint8_t *path, uint32_t path_length,
+    ot_video_info *out_info);
+ot_status ot_video_play(ot_context *, const ot_handle *node);
+ot_status ot_video_pause(ot_context *, const ot_handle *node);
+ot_status ot_video_seek(ot_context *, const ot_handle *node, int64_t time_us);
+ot_status ot_video_set_loop(ot_context *, const ot_handle *node, uint32_t loop);
+ot_status ot_video_set_muted(ot_context *, const ot_handle *node, uint32_t muted);
+ot_status ot_video_set_volume(ot_context *, const ot_handle *node, float volume);
+/* Positive offsets show frames earlier relative to the media clock. */
+ot_status ot_video_set_av_sync_offset(ot_context *, const ot_handle *node, int64_t offset_us);
+ot_status ot_video_get_state(ot_context *, const ot_handle *node, ot_video_state *out_state);
+/* Copies at most capacity bytes of the last failure detail; out_length receives its full length. */
+ot_status ot_video_get_error(ot_context *, const ot_handle *node, uint8_t *out, uint32_t capacity,
+    uint32_t *out_length);
 
 /* x/y and width/height count terminal cells. pixel_* and source_* count image
  * pixels. Absent source extents and reserved fields must be zero. Exact size and

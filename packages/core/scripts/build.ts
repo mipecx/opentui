@@ -197,7 +197,11 @@ if (buildNative) {
     zigArgs.push("-Dgpa-safe-stats=true")
   }
 
-  if (!skipZig) runCommand("zig", zigArgs, nativeRoot, "Error: Zig build failed")
+  if (!skipZig) {
+    // Native video statically links FFmpeg; prepare:zig builds only the host prefixes.
+    if (buildAll) runCommand("bun", ["scripts/build-ffmpeg.ts", "--all"], nativeRoot, "Error: FFmpeg build failed")
+    runCommand("zig", zigArgs, nativeRoot, "Error: Zig build failed")
+  }
 
   const variantsToPackage = buildAll ? variants : [getHostVariant()]
 
@@ -271,7 +275,8 @@ export default module.default
           main: "index.js",
           module: "index.js",
           types: "index.d.ts",
-          license: packageJson.license,
+          // The binaries statically link LGPL FFmpeg.
+          license: `${packageJson.license} AND LGPL-2.1-or-later`,
           author: packageJson.author,
           homepage: packageJson.homepage,
           repository: packageJson.repository,
@@ -309,6 +314,9 @@ export default module.default
       [join(nativeRoot, "src", "vendor", "libwebp", "PATENTS"), "PATENTS-LIBWEBP"],
       [join(nativeRoot, "src", "vendor", "libwebp", "AUTHORS"), "AUTHORS-LIBWEBP"],
       [join(nativeRoot, "src", "vendor", "lcms2", "LICENSE"), "LICENSE-LCMS2"],
+      [join(nativeRoot, "src", "vendor", "ffmpeg", "COPYING.LGPLv2.1"), "LICENSE-FFMPEG"],
+      [join(nativeRoot, "src", "vendor", "ffmpeg", "README.md"), "FFMPEG-SOURCE.md"],
+      [join(nativeRoot, "src", "vendor", "ffmpeg", "LICENSE-ZLIB"), "LICENSE-ZLIB"],
     ] as const) {
       if (!existsSync(source)) throw new Error(`Required native license file is missing: ${source}`)
       copyFileSync(source, join(nativeDir, destination))
